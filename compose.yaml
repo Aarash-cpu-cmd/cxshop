@@ -1,0 +1,51 @@
+services:
+  db:
+    image: mysql:5.7
+    environment:
+      MYSQL_DATABASE: cxshop
+      MYSQL_USER: shop
+      MYSQL_PASSWORD: shoppass
+      MYSQL_RANDOM_ROOT_PASSWORD: "1"
+    volumes:
+      - shop_data:/var/lib/mysql
+
+  shop:
+    build: .
+    ports:
+      - "8082:8000"
+    environment:
+      DB_HOST: db
+      ADMIN_PASS: ${ADMIN_PASS:-admin123}
+    depends_on:
+      - db
+
+  dispatcher:
+    build:
+      context: .
+      dockerfile: Dockerfile.dispatcher
+    environment:
+      DB_HOST: db
+      JOBS_DIR: /jobdata
+      JOBDIR_HOST: /home/ubuntu/cxshop_jobs
+      TOOLKIT_HOST: /home/ubuntu/chaoxing-grind
+      WORKER_IMAGE: fd-worker
+      PROXY_API: http://proxypool:5010/pop
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /home/ubuntu/cxshop_jobs:/jobdata
+    depends_on:
+      - db
+      - proxypool
+
+  proxypool:
+    build: ./proxy_pool
+    environment:
+      DB_CONN: redis://@proxy_redis:6379/0
+    depends_on:
+      - proxy_redis
+
+  proxy_redis:
+    image: mirror.gcr.io/library/redis:7-alpine
+
+volumes:
+  shop_data:

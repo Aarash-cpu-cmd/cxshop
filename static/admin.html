@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="zh"><head><meta charset="utf-8"><title>CXSHOP · 管理后台</title>
+<style>
+:root{--bg:#0b0f1a;--card:#131a2b;--txt:#e8ecf5;--dim:#8b93ab;--acc:#7c5cff;--acc2:#00d4a6}
+*{margin:0;padding:0;box-sizing:border-box;font-family:"PingFang SC","Microsoft YaHei",sans-serif}
+body{background:var(--bg);color:var(--txt)}
+.wrap{max-width:1100px;margin:0 auto;padding:30px 20px}
+h1{font-size:22px}h1 b{color:var(--acc)}
+table{width:100%;border-collapse:collapse;margin-top:18px;font-size:13px;background:var(--card);border-radius:12px;overflow:hidden}
+th,td{padding:11px 14px;text-align:left;border-bottom:1px solid #ffffff10}
+th{color:var(--dim);font-weight:500;background:#0d1322}
+.st{padding:3px 10px;border-radius:999px;font-size:11px;font-weight:600}
+.st.queued{background:#ffb02022;color:#ffb020}.st.running{background:#5b8cff22;color:#7aa2ff}
+.st.done{background:#00d4a622;color:var(--acc2)}.st.fail{background:#ff5c7a22;color:#ff5c7a}
+a{color:var(--acc)}
+</style></head><body><div class="wrap">
+<h1><b>CX</b>SHOP 管理后台</h1>
+<p style="color:var(--dim);margin-top:6px;font-size:13px" id="sub">订单总览</p>
+<table><thead><tr><th>#</th><th>用户</th><th>商品</th><th>金额</th><th>状态</th><th>下单时间</th></tr></thead>
+<tbody id="list"></tbody></table>
+<p style="margin-top:20px"><a href="/">← 返回商城</a></p>
+</div>
+<script>
+const tok=localStorage.cxshop_tok||'';
+(async()=>{const r=await fetch('/api/admin/orders',{headers:{'X-Token':tok}}).then(x=>x.json());
+if(!r.ok){document.getElementById('sub').textContent='需要管理员登录';return}
+document.getElementById('list').innerHTML=r.items.map(o=>{const t=new Date(o.created_at*1000).toLocaleString('zh-CN',{hour12:false});
+const c={queued:'queued',running:'running',done:'done',fail:'fail'}[o.status]||'queued';
+return`<tr><td>${o.oid}</td><td>${o.username}</td><td>${o.name}</td><td>¥${o.fees}</td><td><span class="st ${c}">${o.status}</span></td><td>${t}</td></tr>`}).join('')})();
+</script></body></html>
