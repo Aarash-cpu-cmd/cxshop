@@ -57,7 +57,7 @@ def run_cli(jobdir, proxy, *args):
     r = subprocess.run(_docker_base(jobdir, proxy) +
                        ['python', '-m', 'chaoxing_grind.cli'] + list(args),
                        capture_output=True, text=True, timeout=1800)
-    return (r.stdout or '') + (r.stderr or '')
+    return r.returncode, (r.stdout or '') + (r.stderr or '')
 
 
 def run_grind(jobdir, proxy):
@@ -90,10 +90,13 @@ def process_order(conn, o):
     proxy = get_proxy()
     if proxy:
         log.append(f'proxy: {proxy}\n')
-    out = run_cli(d, proxy, 'scan', '--cookies', '/job/cookies.json',
-                  '--courses', '/job/courses.json')
+    args = ('scan', '--cookies', '/job/cookies.json', '--courses', '/job/courses.json')
+    rc, out = run_cli(d, proxy, *args)
+    if rc != 0 and proxy:
+        log.append('proxy failed, retrying direct\n')
+        rc, out = run_cli(d, None, *args)
     log.append('$ cx scan\n' + out)
-    return 'done', ''.join(log)[-6000:]
+    return ('done' if rc == 0 else 'fail'), ''.join(log)[-6000:]
 
 
 def main():
