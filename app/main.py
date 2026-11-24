@@ -248,14 +248,20 @@ def api_auth(uid, key):
     return None
 
 
-@app.post('/api.php')
+@app.api_route('/api.php', methods=['GET', 'POST'])
 @limiter.limit('120/minute')
 async def upstream_api(request: Request, act: str = ''):
-    f = await request.form()
-    uid = _cap(f.get('uid'), 20)
-    key = _cap(f.get('key'), 64)
+    if request.method == 'POST':
+        f = await request.form()
+    else:
+        f = {}
+    def _p(name):
+        v = f.get(name)
+        return v if v is not None else request.query_params.get(name)
+    uid = _cap(_p('uid'), 20)
+    key = _cap(_p('key'), 64)
     if not act:
-        act = _cap(f.get('act'), 32)
+        act = _cap(_p('act'), 32)
     u = api_auth(uid, key)
     if not u:
         return {'code': -2, 'msg': '密匙错误'}
@@ -273,13 +279,13 @@ async def upstream_api(request: Request, act: str = ''):
         return {'code': 1, 'data': items}
 
     if act == 'add':
-        school = _cap(f.get('school'), 255)
-        stu_user = _cap(f.get('user'), 255)
-        stu_pass = _cap(f.get('pass'), 255)
-        platform = _to_int(f.get('platform'))
-        kcids = _cap(f.get('kcid'), 4000)
-        kcnames = _cap(f.get('kcname'), 4000)
-        cookies = _cap(f.get('cookies'), 65536)
+        school = _cap(_p('school'), 255)
+        stu_user = _cap(_p('user'), 255)
+        stu_pass = _cap(_p('pass'), 255)
+        platform = _to_int(_p('platform'))
+        kcids = _cap(_p('kcid'), 4000)
+        kcnames = _cap(_p('kcname'), 4000)
+        cookies = _cap(_p('cookies'), 65536)
         if not school or not platform:
             return {'code': 0, 'msg': '所有项目不能为空'}
         names = kcnames.split(',') if kcnames else []
@@ -305,7 +311,7 @@ async def upstream_api(request: Request, act: str = ''):
             return {'code': 1, 'msg': f'成功提交{n}门课程', 'data': {'oid': c.lastrowid}}
 
     if act == 'budan':
-        oid = _to_int(f.get('id') or f.get('oid'))
+        oid = _to_int(_p('id') or _p('oid'))
         if not oid:
             return {'code': -1, 'msg': '订单号无效'}
         with tx() as con, con.cursor() as c:
@@ -320,7 +326,7 @@ async def upstream_api(request: Request, act: str = ''):
             return {'code': 1, 'msg': '已重新下单'}
 
     if act in ('chadanoid', 'get', 'up'):
-        oid = _to_int(f.get('yid') or f.get('id') or f.get('oid'))
+        oid = _to_int(_p('yid') or _p('id') or _p('oid'))
         if not oid:
             return {'code': -1, 'msg': '订单号无效'}
         with tx() as con, con.cursor() as c:
