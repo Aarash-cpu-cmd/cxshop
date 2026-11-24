@@ -1,35 +1,77 @@
-# CXSHOP · 网课代刷门面系统
+<div align="center">
 
-自研代刷接单系统：FastAPI 门面 + 订单调度器 + Docker worker 刷课 + 代理 IP 池，一条 `docker compose up` 起全栈。
+# ⚡ CXSHOP
 
-## 架构
+### 网课代刷门面 + 订单调度系统
+
+[![Python](https://img.shields.io/badge/Python-3.11-3776AB?logo=python&logoColor=white)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-uvicorn-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com)
+[![Docker](https://img.shields.io/badge/Docker-compose-2496ED?logo=docker&logoColor=white)](https://www.docker.com)
+[![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
+[![Worker](https://img.shields.io/badge/Engine-chaoxing--grind-8b5cf6)](https://github.com/Aarash-cpu-cmd/chaoxing-grind)
+
+**自研 · 全链路 · 真实播放引擎 — 一条 `docker compose up` 起全栈**
+
+</div>
+
+---
+
+## 🏗 架构
 
 ```
-买家 → shop(FastAPI+自带前端) → orders表 → dispatcher → fd-worker容器(chromium+chaoxing-grind)
-                                          ↘ proxypool → 每单一个出口代理(可选)
+买家 ──▶ CXSHOP 门面(FastAPI) ──▶ orders 队列 ──▶ dispatcher
+                                                  │
+              ┌── fd-worker 容器 ─────────────────┤
+              │   headless Chromium               │
+              │   + chaoxing-grind 工具包         │
+              │   真实播放 · 抗回滚               │
+              └───────────────────────────────────┘
+                          ▲
+              proxypool ──┘ 每单 sticky 出口代理(可选)
 ```
 
-- **shop**：注册/登录/下单/订单进度/管理后台（原生单页前端，无构建）
-- **dispatcher**：轮询 `status='queued'` 订单 → 起 worker 容器 → 回写状态与日志
-- **fd-worker**：headless Chromium + [chaoxing-grind](https://github.com/Aarash-cpu-cmd/chaoxing-grind) 工具包
-- **proxypool**：[jhao104/proxy_pool](https://github.com/jhao104/proxy_pool)（MIT，vendored）免费代理采集+验证+REST API；worker 启动时取一个 sticky 出口
+| 模块 | 说明 |
+|---|---|
+| 🛍 **shop** | 注册/登录/商城/订单进度/管理后台 — 原生单页前端零构建 |
+| 📮 **api.php** | FreeDom/29网课兼容上游接口，下游店铺直接对接 |
+| 🔀 **dispatcher** | 轮询队列 → 起 worker 容器 → 回写状态与日志 |
+| 🎬 **fd-worker** | headless Chromium + chaoxing-grind，真实播放刷课 |
+| 🌐 **proxypool** | vendored [jhao104/proxy_pool](https://github.com/jhao104/proxy_pool)，代理采集+验证+REST |
 
-## 快速开始
+## 🚀 快速开始
 
 ```bash
+git clone https://github.com/Aarash-cpu-cmd/cxshop.git && cd cxshop
 docker compose up -d
-# 门面: http://localhost:8082  管理后台: http://localhost:8082/admin
-# 默认管理员: admin / admin123 (ADMIN_PASS 环境变量可改)
 ```
 
-worker 镜像 `fd-worker` 需预先构建（chaoxing-grind 目录的 Dockerfile.worker）。
+- 🛍 商城：`http://localhost:8082`
+- 👑 后台：`http://localhost:8082/admin`（admin / admin123，`ADMIN_PASS` 可改）
+- worker 镜像 `fd-worker` 用 [chaoxing-grind](https://github.com/Aarash-cpu-cmd/chaoxing-grind) 的 `Dockerfile.worker` 构建
 
-## 订单约定
+## 📡 对接协议（api.php）
 
-- `cookies`：学习通导出的 cookies.json（无 cookie 密码登录暂未实现）
-- `kcid`：JSON，如 `{"课程id": {"clazzid":"xxx","name":"xxx"}}`
-- 状态机：`queued → running → done/fail`
+下游店铺按 FreeDom 协议 POST `uid` + `key`：
 
-## 备注
+| act | 用途 |
+|---|---|
+| `getclass` | 拉商品目录（cid/价格/说明） |
+| `getmoney` | 查余额 |
+| `add` | 下单（platform/school/user/pass/kcid/kcname/cookies） |
+| `budan` | 补刷重投 |
+| `chadanoid` | 查订单进度 |
 
-proxy_pool 为免费公开代理源，仅供演示；生产建议替换为付费住宅代理 API（`PROXY_API` 指向你的接口即可，返回 `{"proxy":"ip:port"}`）。
+## 📦 订单约定
+
+- `cookies`：课程平台导出的 cookies.json
+- `kcid`：`{"课程id": {"clazzid":"xx","name":"xx"}}`
+- 状态机：`queued → running → done / fail`
+
+## ⚠️ 备注
+
+- proxypool 采的是免费公开代理，仅演示用；生产换付费住宅代理 API（`PROXY_API` 指过去即可）
+- 仅供学习交流 ⚠️
+
+<div align="center">
+<sub>Built with Devin · Powered by real browsers, not fake heartbeats</sub>
+</div>

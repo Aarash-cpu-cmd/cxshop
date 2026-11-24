@@ -173,11 +173,98 @@ def order_detail(oid: int, request: Request):
         return {'ok': True, 'item': r} if r else JSONResponse({'ok': False}, 404)
 
 
-# ---------- upstream api (FreeDom-compatible api.php shape) ----------
+# ---------- upstream api (FreeDom/29网课-compatible api.php) ----------
+# 下游店铺按 uid+key 调 act=getclass/getmoney/add/budan/chadanoid
+def api_auth(uid, key):
+    if not uid or not key:
+        return None
+    with db().cursor() as c:
+        c.execute("SELECT uid,username,balance,api_key FROM users WHERE uid=%s", (uid,))
+        r = c.fetchone()
+        if r and r[3] and r[3] != '0' and r[3] == key:
+            return r
+    return None
+
+
 @app.post('/api.php')
-def upstream_api():
-    # partner-side docking lands here: uid+key auth, acts getclass/getmoney/get/add
-    return {'code': -1, 'msg': 'not implemented yet'}
+async def upstream_api(request: Request, act: str = ''):
+    f = await request.form()
+    uid = (f.get('uid') or '').strip()
+    key = (f.get('key') or '').strip()
+    if not act:
+        act = (f.get('act') or '').strip()
+    u = api_auth(uid, key)
+    if not u:
+        return {'code': -2, 'msg': '密匙错误'}
+
+    if act == 'getmoney':
+        return {'code': 1, 'msg': '查询成功', 'user': u[1], 'name': u[1], 'money': float(u[2])}
+
+    if act == 'getclass':
+        with db().cursor(pymysql.cursors.DictCursor) as c:
+            c.execute("SELECT pid,name,price,descr FROM products WHERE enabled=1 ORDER BY pid")
+            items = [{'cid': r['pid'], 'kcid': r['pid'], 'name': r['name'],
+                      'noun': '', 'price': float(r['price']), 'info': r['descr'],
+                      'content': r['descr'], 'status': 1, 'miaoshua': 0,
+                      'sort': r['pid']} for r in c.fetchall()]
+        return {'code': 1, 'data': items}
+
+    if act == 'add':
+        school = (f.get('school') or '').strip()
+        stu_user = (f.get('user') or '').strip()
+        stu_pass = (f.get('pass') or '').strip()
+        platform = (f.get('platform') or '').strip()
+        kcids = (f.get('kcid') or '').strip()
+        kcnames = (f.get('kcname') or '').strip()
+        cookies = (f.get('cookies') or '').strip()
+        if not school or not platform:
+            return {'code': 0, 'msg': '所有项目不能为空'}
+        with db().cursor() as c:
+            c.execute("SELECT price,name FROM products WHERE pid=%s AND enabled=1", (platform,))
+            p = c.fetchone()
+            if not p:
+                return {'code': -1, 'msg': '项目不存在或已下架'}
+            if u[2] < p[0]:
+                return {'code': -1, 'msg': f'你的余额不足{p[0]}元，请尽快充值'}
+            names = kcnames.split(',') if kcnames else []
+            ids = kcids.split(',') if kcids else []
+            courses = {i: {'clazzid': '', 'name': n} for i, n in zip(ids, names)}
+            n = max(len(ids), 1)
+            total = float(p[0]) * n
+            if float(u[2]) < total:
+                return {'code': -1, 'msg': f'余额不足{total}元'}
+            c.execute("UPDATE users SET balance=balance-%s WHERE uid=%s", (total, u[0]))
+            c.execute("""INSERT INTO orders(uid,pid,school,stu_user,stu_pass,cookies,kcid,status,fees,created_at)
+                         VALUES(%s,%s,%s,%s,%s,%s,%s,'queued',%s,%s)""",
+                      (u[0], platform, school, stu_user, stu_pass, cookies,
+                       json.dumps(courses, ensure_ascii=False), total, int(time.time())))
+            return {'code': 1, 'msg': f'成功提交{n}门课程', 'data': {'oid': c.lastrowid}}
+
+    if act == 'budan':
+        oid = (f.get('id') or f.get('oid') or '').strip()
+        with db().cursor() as c:
+            c.execute("SELECT uid,status FROM orders WHERE oid=%s", (oid,))
+            r = c.fetchone()
+            if not r or r[0] != u[0]:
+                return {'code': -1, 'msg': '订单不存在'}
+            if r[1] == 'running':
+                return {'code': -1, 'msg': '订单处理中'}
+            c.execute("UPDATE orders SET status='queued', worker_log=%s WHERE oid=%s",
+                      ('re-queued by API budan', oid))
+            return {'code': 1, 'msg': '已重新下单'}
+
+    if act in ('chadanoid', 'get', 'up'):
+        oid = (f.get('yid') or f.get('id') or f.get('oid') or '').strip()
+        with db().cursor() as c:
+            c.execute("SELECT uid,status,worker_log FROM orders WHERE oid=%s", (oid,))
+            r = c.fetchone()
+            if not r or r[0] != u[0]:
+                return {'code': -1, 'msg': '订单不存在'}
+            return {'code': 1, 'msg': 'ok', 'data': {'oid': oid, 'status': r[1],
+                    'dockstatus': {'queued': '0', 'running': 'cli_run', 'done': 'cli_done',
+                                   'fail': 'cli_fail'}.get(r[1], '0'), 'log': (r[2] or '')[-500:]}}
+
+    return {'code': -1, 'msg': f'unknown act: {act}'}
 
 
 # ---------- admin ----------
