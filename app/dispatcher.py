@@ -12,8 +12,12 @@ DB = dict(host=os.environ.get('DB_HOST', 'db'),
           database=os.environ.get('DB_NAME', 'cxshop'),
           charset='utf8mb4', autocommit=True)
 JOBS_DIR = os.environ.get('JOBS_DIR', '/jobdata')
-JOBDIR_HOST = os.environ.get('JOBDIR_HOST', '/home/ubuntu/cxshop_jobs')
-TOOLKIT_HOST = os.environ.get('TOOLKIT_HOST', '/home/ubuntu/chaoxing-grind')
+# Named docker volume shared between dispatcher and spawned workers.
+# No host paths: works identically on any server/docker project dir.
+JOB_VOLUME = os.environ.get('JOB_VOLUME', 'cxshop_jobs_data')
+# Optional host checkout of the toolkit to mount over /app (dev override);
+# normally the worker image already has the toolkit baked in.
+TOOLKIT_HOST = os.environ.get('TOOLKIT_HOST', '')
 IMAGE = os.environ.get('WORKER_IMAGE', 'fd-worker')
 PROXY_API = os.environ.get('PROXY_API', 'http://proxypool:5010/pop')
 POLL = int(os.environ.get('POLL_SECONDS', '5'))
@@ -44,30 +48,32 @@ def claim(conn):
     return row
 
 
-def _docker_base(jobdir, proxy):
+def _docker_base(oid, proxy):
+    # Mount the shared jobs volume at /job; each order uses /job/<oid>.
     cmd = ['docker', 'run', '--rm', '--network', 'host',
-           '-v', f'{JOBDIR_HOST}/{os.path.basename(jobdir)}:/job',
-           '-v', f'{TOOLKIT_HOST}:/app', '-w', '/app']
+           '-v', f'{JOB_VOLUME}:/job', '-w', '/app']
+    if TOOLKIT_HOST:
+        cmd += ['-v', f'{TOOLKIT_HOST}:/app']
     if proxy:
         cmd += ['-e', f'HTTPS_PROXY={proxy}', '-e', f'HTTP_PROXY={proxy}']
     return cmd + [IMAGE]
 
 
-def run_cli(jobdir, proxy, *args):
-    r = subprocess.run(_docker_base(jobdir, proxy) +
+def run_cli(oid, proxy, *args):
+    r = subprocess.run(_docker_base(oid, proxy) +
                        ['python', '-m', 'chaoxing_grind.cli'] + list(args),
                        capture_output=True, text=True, timeout=1800)
     return r.returncode, (r.stdout or '') + (r.stderr or '')
 
 
-def run_grind(jobdir, proxy):
+def run_grind(oid, proxy):
     prox = f' --proxy-server={proxy}' if proxy else ''
-    cmd = _docker_base(jobdir, proxy) + ['sh', '-c',
+    cmd = _docker_base(oid, proxy) + ['sh', '-c',
         f'chromium --headless=new --no-sandbox --remote-debugging-port=9222{prox} '
         '--user-data-dir=/tmp/prof about:blank & sleep 4 && '
-        'python scripts/inject_cookies_cdp.py --cookies /job/cookies.json '
+        f'python scripts/inject_cookies_cdp.py --cookies /job/{oid}/cookies.json '
         '--port 9222 && python -m chaoxing_grind.cli grind --jobs '
-        '/job/jobs.json --port 9222 --tabs 1 --done /job/grind_done.json']
+        f'/job/{oid}/jobs.json --port 9222 --tabs 1 --done /job/{oid}/grind_done.json']
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
     return (r.stdout or '') + (r.stderr or '')
 
@@ -90,11 +96,12 @@ def process_order(conn, o):
     proxy = get_proxy()
     if proxy:
         log.append(f'proxy: {proxy}\n')
-    args = ('scan', '--cookies', '/job/cookies.json', '--courses', '/job/courses.json')
-    rc, out = run_cli(d, proxy, *args)
+    args = ('scan', '--cookies', f'/job/{oid}/cookies.json',
+            '--courses', f'/job/{oid}/courses.json')
+    rc, out = run_cli(oid, proxy, *args)
     if rc != 0 and proxy:
         log.append('proxy failed, retrying direct\n')
-        rc, out = run_cli(d, None, *args)
+        rc, out = run_cli(oid, None, *args)
     log.append('$ cx scan\n' + out)
     return ('done' if rc == 0 else 'fail'), ''.join(log)[-6000:]
 

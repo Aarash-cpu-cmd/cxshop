@@ -1,44 +1,68 @@
 services:
   db:
     image: mysql:5.7
+    restart: unless-stopped
     environment:
       MYSQL_DATABASE: cxshop
       MYSQL_USER: shop
-      MYSQL_PASSWORD: shoppass
+      MYSQL_PASSWORD: ${DB_PASS:-shoppass}
       MYSQL_RANDOM_ROOT_PASSWORD: "1"
     volumes:
       - shop_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -p$$MYSQL_PASSWORD --silent"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
 
   shop:
     build: .
+    restart: unless-stopped
     ports:
-      - "8082:8000"
+      - "${SHOP_PORT:-8082}:8000"
     environment:
       DB_HOST: db
+      DB_PASS: ${DB_PASS:-shoppass}
       ADMIN_PASS: ${ADMIN_PASS:-admin123}
     depends_on:
-      - db
+      db:
+        condition: service_healthy
+
+  # Builds the fd-worker image (Chromium + baked-in chaoxing-grind toolkit),
+  # then exits. Real workers are spawned per-order by the dispatcher.
+  worker:
+    image: fd-worker
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    command: ["sh", "-c", "echo fd-worker image ready"]
 
   dispatcher:
     build:
       context: .
       dockerfile: Dockerfile.dispatcher
+    restart: unless-stopped
     environment:
       DB_HOST: db
+      DB_PASS: ${DB_PASS:-shoppass}
       JOBS_DIR: /jobdata
-      JOBDIR_HOST: /home/ubuntu/cxshop_jobs
-      TOOLKIT_HOST: /home/ubuntu/chaoxing-grind
+      JOB_VOLUME: ${COMPOSE_PROJECT_NAME:-cxshop}_jobs_data
       WORKER_IMAGE: fd-worker
       PROXY_API: http://proxypool:5010/pop
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - /home/ubuntu/cxshop_jobs:/jobdata
+      - jobs_data:/jobdata
     depends_on:
-      - db
-      - proxypool
+      db:
+        condition: service_healthy
+      proxypool:
+        condition: service_started
+      worker:
+        condition: service_completed_successfully
 
   proxypool:
     build: ./proxy_pool
+    restart: unless-stopped
     environment:
       DB_CONN: redis://@proxy_redis:6379/0
     depends_on:
@@ -46,6 +70,8 @@ services:
 
   proxy_redis:
     image: mirror.gcr.io/library/redis:7-alpine
+    restart: unless-stopped
 
 volumes:
   shop_data:
+  jobs_data:

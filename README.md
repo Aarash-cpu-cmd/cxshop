@@ -55,14 +55,18 @@
 
 ## 🚀 快速开始
 
+**任意一台装了 Docker 的服务器，一条命令起全栈**（MySQL 初始化、建表、管理员、商品种子全部自动）：
+
 ```bash
 git clone https://github.com/Aarash-cpu-cmd/cxshop.git && cd cxshop
-docker compose up -d
+docker compose up -d --build
 ```
 
-- 🛍 商城：`http://localhost:8082`
+- 🛍 商城：`http://localhost:8082`（改端口：`SHOP_PORT=8092 docker compose up -d`）
 - 👑 后台：`http://localhost:8082/admin`（admin / admin123，`ADMIN_PASS` 可改）
-- worker 镜像 `fd-worker` 用 [chaoxing-grind](https://github.com/Aarash-cpu-cmd/chaoxing-grind) 的 `Dockerfile.worker` 构建
+- `fd-worker` 镜像构建时自动从 GitHub 拉取 [chaoxing-grind](https://github.com/Aarash-cpu-cmd/chaoxing-grind)（可用 `--build-arg TOOLKIT_REF=<tag>` 锁定版本），Chromium + 字体全在镜像内，服务器零依赖
+- 订单作业文件走命名卷 `*_jobs_data`（dispatcher ↔ worker 共享），不依赖任何宿主机路径
+- 可选环境变量：`DB_PASS`（默认 shoppass）、`ADMIN_PASS`、`SHOP_PORT`、`PROXY_API`（置空则 worker 直连）
 
 ## 📡 对接协议（api.php）
 

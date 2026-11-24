@@ -1,0 +1,15 @@
+FROM mirror.gcr.io/library/python:3.11-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    chromium fonts-noto-cjk git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Toolkit is baked in so a fresh server needs no host-side checkout.
+# Pin to a tag/commit via: docker compose build --build-arg TOOLKIT_REF=v1.0.0 worker
+ARG TOOLKIT_REF=master
+RUN git clone --depth 1 -b ${TOOLKIT_REF} https://github.com/Aarash-cpu-cmd/chaoxing-grind /app
+
+WORKDIR /app
+RUN pip install --no-cache-dir -r requirements.txt
+
+ENV CX_CDP_PORT=9222
