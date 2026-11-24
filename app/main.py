@@ -103,6 +103,10 @@ def init_schema():
             url VARCHAR(255), api_uid VARCHAR(64), api_key VARCHAR(128),
             pt VARCHAR(8) DEFAULT '29', enabled TINYINT DEFAULT 1)
             ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""")
+        c.execute("""CREATE TABLE IF NOT EXISTS cards(
+            code VARCHAR(32) PRIMARY KEY, amount DECIMAL(10,2),
+            used_by INT DEFAULT NULL, used_at BIGINT DEFAULT NULL,
+            created_at BIGINT) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""")
         c.execute("SELECT COUNT(*) n FROM products")
         if c.fetchone()[0] == 0:
             c.execute("""INSERT INTO products(name,price,descr) VALUES
@@ -141,8 +145,8 @@ def register(request: Request, cr: Creds):
     uname = cr.username.strip()
     if not re.fullmatch(r'[\w\-]{3,32}', uname):
         return JSONResponse({'ok': False, 'msg': '用户名需 3-32 位字母/数字/下划线'}, 400)
-    if len(cr.password) < 6:
-        return JSONResponse({'ok': False, 'msg': '密码至少 6 位'}, 400)
+    if not 6 <= len(cr.password) <= 128:
+        return JSONResponse({'ok': False, 'msg': '密码需 6-128 位'}, 400)
     key = secrets.token_hex(16)
     try:
         with tx() as con, con.cursor() as c:
@@ -232,6 +236,31 @@ def order_detail(oid: int, request: Request):
         c.execute("SELECT oid,status,worker_log,created_at FROM orders WHERE oid=%s AND uid=%s", (oid, u[0]))
         r = c.fetchone()
         return {'ok': True, 'item': r} if r else JSONResponse({'ok': False}, 404)
+
+
+# ---------- recharge (卡密充值) ----------
+class RechargeIn(BaseModel):
+    code: str = Field('', max_length=64)
+
+
+@app.post('/api/recharge')
+@limiter.limit('30/minute')
+def recharge(request: Request, r: RechargeIn):
+    u = sess_get(request.headers.get('X-Token', ''))
+    if not u:
+        return JSONResponse({'ok': False}, 401)
+    code = r.code.strip().upper()
+    if not code:
+        return JSONResponse({'ok': False, 'msg': '卡密不能为空'}, 400)
+    with tx(atomic=True) as con, con.cursor() as c:
+        c.execute("UPDATE cards SET used_by=%s,used_at=%s WHERE code=%s AND used_by IS NULL",
+                  (u[0], int(time.time()), code))
+        if c.rowcount != 1:
+            return JSONResponse({'ok': False, 'msg': '卡密无效或已被使用'}, 400)
+        c.execute("SELECT amount FROM cards WHERE code=%s", (code,))
+        amt = float(c.fetchone()[0])
+        c.execute("UPDATE users SET balance=balance+%s WHERE uid=%s", (amt, u[0]))
+        return {'ok': True, 'amount': amt}
 
 
 # ---------- upstream api (FreeDom/29网课-compatible api.php) ----------
@@ -342,6 +371,11 @@ async def upstream_api(request: Request, act: str = ''):
 
 
 # ---------- admin ----------
+def _admin(request):
+    u = sess_get(request.headers.get('X-Token', ''))
+    return u if u and u[3] == 'admin' else None
+
+
 @app.get('/api/admin/orders')
 def admin_orders(request: Request):
     u = sess_get(request.headers.get('X-Token', ''))
@@ -352,6 +386,54 @@ def admin_orders(request: Request):
                      FROM orders o JOIN products p ON p.pid=o.pid JOIN users u ON u.uid=o.uid
                      ORDER BY oid DESC LIMIT 200""")
         return {'ok': True, 'items': c.fetchall()}
+
+
+class CardGen(BaseModel):
+    amount: float
+    count: int = 1
+
+
+@app.post('/api/admin/cards')
+def admin_cards_gen(request: Request, g: CardGen):
+    if not _admin(request):
+        return JSONResponse({'ok': False}, 403)
+    if not 0 < g.amount <= 100000 or not 1 <= g.count <= 200:
+        return JSONResponse({'ok': False, 'msg': '参数无效'}, 400)
+    codes = ['CX' + secrets.token_hex(4).upper() + '-' + secrets.token_hex(2).upper()
+             for _ in range(g.count)]
+    with tx(atomic=True) as con, con.cursor() as c:
+        c.executemany("INSERT INTO cards(code,amount,created_at) VALUES(%s,%s,%s)",
+                      [(k, g.amount, int(time.time())) for k in codes])
+    return {'ok': True, 'codes': codes}
+
+
+@app.get('/api/admin/cards')
+def admin_cards_list(request: Request):
+    if not _admin(request):
+        return JSONResponse({'ok': False}, 403)
+    with tx() as con, con.cursor(pymysql.cursors.DictCursor) as c:
+        c.execute("""SELECT c.code,c.amount,c.used_by,c.used_at,c.created_at,u.username
+                     FROM cards c LEFT JOIN users u ON u.uid=c.used_by
+                     ORDER BY c.created_at DESC LIMIT 200""")
+        return {'ok': True, 'items': c.fetchall()}
+
+
+class CreditIn(BaseModel):
+    uid: int
+    amount: float
+
+
+@app.post('/api/admin/credit')
+def admin_credit(request: Request, ci: CreditIn):
+    if not _admin(request):
+        return JSONResponse({'ok': False}, 403)
+    if not -100000 < ci.amount < 100000 or ci.amount == 0:
+        return JSONResponse({'ok': False, 'msg': '金额无效'}, 400)
+    with tx(atomic=True) as con, con.cursor() as c:
+        c.execute("UPDATE users SET balance=balance+%s WHERE uid=%s", (ci.amount, ci.uid))
+        if c.rowcount != 1:
+            return JSONResponse({'ok': False, 'msg': '用户不存在'}, 404)
+    return {'ok': True}
 
 
 # ---------- pages ----------

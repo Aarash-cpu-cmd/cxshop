@@ -6,25 +6,70 @@
 body{background:var(--bg);color:var(--txt)}
 .wrap{max-width:1100px;margin:0 auto;padding:30px 20px}
 h1{font-size:22px}h1 b{color:var(--acc)}
-table{width:100%;border-collapse:collapse;margin-top:18px;font-size:13px;background:var(--card);border-radius:12px;overflow:hidden}
+h2{font-size:15px;margin:34px 0 10px;color:var(--acc2)}
+table{width:100%;border-collapse:collapse;margin-top:14px;font-size:13px;background:var(--card);border-radius:12px;overflow:hidden}
 th,td{padding:11px 14px;text-align:left;border-bottom:1px solid #ffffff10}
 th{color:var(--dim);font-weight:500;background:#0d1322}
 .st{padding:3px 10px;border-radius:999px;font-size:11px;font-weight:600}
 .st.queued{background:#ffb02022;color:#ffb020}.st.running{background:#5b8cff22;color:#7aa2ff}
 .st.done{background:#00d4a622;color:var(--acc2)}.st.fail{background:#ff5c7a22;color:#ff5c7a}
 a{color:var(--acc)}
+input,select{background:#0d1322;border:1px solid #ffffff1e;border-radius:9px;color:var(--txt);padding:9px 12px;font-size:13px;margin-right:8px}
+.btn{background:linear-gradient(90deg,var(--acc),#5b8cff);border:none;color:#fff;padding:9px 20px;border-radius:9px;font-size:13px;cursor:pointer;font-weight:600}
+.newcodes{background:#0d1322;border:1px solid #00d4a644;border-radius:9px;padding:12px;margin-top:12px;font-family:ui-monospace,monospace;font-size:12px;white-space:pre-wrap;color:var(--acc2);display:none}
+.used{color:var(--dim);text-decoration:line-through}
 </style></head><body><div class="wrap">
 <h1><b>CX</b>SHOP 管理后台</h1>
 <p style="color:var(--dim);margin-top:6px;font-size:13px" id="sub">订单总览</p>
 <table><thead><tr><th>#</th><th>用户</th><th>商品</th><th>金额</th><th>状态</th><th>下单时间</th></tr></thead>
 <tbody id="list"></tbody></table>
-<p style="margin-top:20px"><a href="/">← 返回商城</a></p>
+
+<h2>卡密充值 · 生成</h2>
+<div>
+  <input id="c-amt" type="number" placeholder="面额 ¥" style="width:110px">
+  <input id="c-n" type="number" placeholder="数量" value="1" min="1" max="200" style="width:80px">
+  <button class="btn" onclick="genCards()">生成卡密</button>
+</div>
+<div class="newcodes" id="newcodes"></div>
+<table><thead><tr><th>卡密</th><th>面额</th><th>状态</th><th>使用者</th><th>生成时间</th></tr></thead>
+<tbody id="clist"></tbody></table>
+
+<h2>手动充值 / 扣款</h2>
+<div>
+  <input id="u-id" type="number" placeholder="用户 uid" style="width:110px">
+  <input id="u-amt" type="number" placeholder="金额（负数=扣款）" style="width:160px">
+  <button class="btn" onclick="credit()">执行</button>
+  <span id="credit-msg" style="color:var(--acc2);font-size:13px"></span>
+</div>
+
+<p style="margin-top:24px"><a href="/">← 返回商城</a></p>
 </div>
 <script>
 const tok=localStorage.cxshop_tok||'';
-(async()=>{const r=await fetch('/api/admin/orders',{headers:{'X-Token':tok}}).then(x=>x.json());
+const api=(p,o={})=>{o.headers={'Content-Type':'application/json','X-Token':tok};
+  if(o.body)o.body=JSON.stringify(o.body);return fetch(p,o).then(x=>x.json())};
+const fmt=t=>t?new Date(t*1000).toLocaleString('zh-CN',{hour12:false}):'';
+(async()=>{const r=await api('/api/admin/orders');
 if(!r.ok){document.getElementById('sub').textContent='需要管理员登录';return}
-document.getElementById('list').innerHTML=r.items.map(o=>{const t=new Date(o.created_at*1000).toLocaleString('zh-CN',{hour12:false});
+document.getElementById('list').innerHTML=r.items.map(o=>{
 const c={queued:'queued',running:'running',done:'done',fail:'fail'}[o.status]||'queued';
-return`<tr><td>${o.oid}</td><td>${o.username}</td><td>${o.name}</td><td>¥${o.fees}</td><td><span class="st ${c}">${o.status}</span></td><td>${t}</td></tr>`}).join('')})();
+return`<tr><td>${o.oid}</td><td>${o.username}</td><td>${o.name}</td><td>¥${o.fees}</td><td><span class="st ${c}">${o.status}</span></td><td>${fmt(o.created_at)}</td></tr>`}).join('');
+loadCards()})();
+async function loadCards(){const r=await api('/api/admin/cards');if(!r.ok)return;
+document.getElementById('clist').innerHTML=r.items.map(k=>`<tr>
+<td class="${k.used_by?'used':''}" style="font-family:monospace">${k.code}</td><td>¥${k.amount}</td>
+<td>${k.used_by?`<span class="st done">已用 ${fmt(k.used_at)}</span>`:'<span class="st queued">未用</span>'}</td>
+<td>${k.username||'—'}</td><td>${fmt(k.created_at)}</td></tr>`}).join('')}
+async function genCards(){const r=await api('/api/admin/cards',{method:'POST',
+body:{amount:parseFloat(document.getElementById('c-amt').value)||0,
+count:parseInt(document.getElementById('c-n').value)||1}});
+if(!r.ok)return alert(r.msg||'生成失败');
+const el=document.getElementById('newcodes');el.style.display='block';
+el.textContent='新卡密（点击复制全部）：\n'+r.codes.join('\n');
+el.onclick=()=>{navigator.clipboard.writeText(r.codes.join('\n'));el.textContent='已复制到剪贴板'};
+loadCards()}
+async function credit(){const r=await api('/api/admin/credit',{method:'POST',
+body:{uid:parseInt(document.getElementById('u-id').value)||0,
+amount:parseFloat(document.getElementById('u-amt').value)||0}});
+document.getElementById('credit-msg').textContent=r.ok?'已执行 ✓':(r.msg||'失败')}
 </script></body></html>

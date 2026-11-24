@@ -107,7 +107,9 @@ footer{margin-top:50px;text-align:center;color:var(--dim);font-size:12px;letter-
     <h2 id="auth-title">登录</h2>
     <input id="u" placeholder="用户名">
     <input id="p" type="password" placeholder="密码">
-    <button class="btn block" onclick="doAuth()">进入商城</button>
+    <input id="p2" type="password" placeholder="确认密码" style="display:none">
+    <div class="hint" id="auth-hint" style="display:none"></div>
+    <button class="btn block" id="auth-btn" onclick="doAuth()">进入商城</button>
     <button class="btn ghost block" onclick="toggleReg()">没有账号？注册</button>
   </div>
 </section>
@@ -143,6 +145,14 @@ footer{margin-top:50px;text-align:center;color:var(--dim);font-size:12px;letter-
   <button class="btn ghost block" onclick="m('m-log',0)">关闭</button>
 </div></div>
 
+<div class="modal" id="m-pay"><div class="box">
+  <h2>余额充值</h2>
+  <input id="r-code" placeholder="输入卡密（例：CX1A2B3C4D-5E6F）" style="text-transform:uppercase">
+  <div class="hint">卡密联系客服购买 · 支持任意面额</div>
+  <button class="btn block" onclick="doRecharge()">立即充值</button>
+  <button class="btn ghost block" onclick="m('m-pay',0)">取消</button>
+</div></div>
+
 <div class="toast" id="toast"></div>
 <script>
 let tok=localStorage.cxshop_tok||'',reg=false,curPid=0;
@@ -153,14 +163,23 @@ function m(id,on){$(id).className='modal'+(on?' on':'')}
 async function api(path,opt={}){opt.headers={'Content-Type':'application/json','X-Token':tok};if(opt.body)opt.body=JSON.stringify(opt.body);
   const r=await fetch(path,opt);return r.json()}
 function toggleReg(){reg=!reg;$('auth-title').textContent=reg?'注册':'登录';
-  document.querySelector('#sec-auth .btn').textContent=reg?'注册并进入':'进入商城'}
+  $('p2').style.display=reg?'':'none';$('auth-hint').style.display='none';
+  $('auth-btn').textContent=reg?'注册并进入':'进入商城'}
+function authErr(t){const h=$('auth-hint');h.textContent=t;h.style.display='block'}
 async function doAuth(){
-  const r=await api(reg?'/api/register':'/api/login',{method:'POST',body:{username:$('u').value,password:$('p').value}});
-  if(!r.ok)return toast(r.msg||'失败');
+  const un=$('u').value.trim(),pw=$('p').value;
+  if(!/^[\w\-]{3,32}$/.test(un))return authErr('用户名需 3-32 位字母/数字/下划线');
+  if(pw.length<6)return authErr('密码至少 6 位');
+  if(reg&&pw!==$('p2').value)return authErr('两次密码不一致');
+  $('auth-btn').disabled=true;
+  const r=await api(reg?'/api/register':'/api/login',{method:'POST',body:{username:un,password:pw}});
+  $('auth-btn').disabled=false;
+  if(!r.ok)return authErr(r.msg||'失败');
+  $('auth-hint').style.display='none';
   tok=r.token;localStorage.cxshop_tok=tok;enter()}
 async function enter(){
   const me=await api('/api/me');if(!me.ok)return show('auth');
-  $('who').innerHTML=`${me.username} · 余额 <b>¥${me.balance.toFixed(2)}</b>`;
+  $('who').innerHTML=`${me.username} · 余额 <b>¥${me.balance.toFixed(2)}</b> · <a href="javascript:m('m-pay',1)">充值</a>`;
   if(me.role==='admin')$('who').innerHTML+=` · <a href="/admin">后台</a>`;
   show('store')}
 function show(s){for(const x of['auth','store','orders'])$('sec-'+x).className='';
@@ -174,7 +193,7 @@ function openOrder(pid,name){curPid=pid;$('mo-title').textContent='下单 · '+n
 async function submitOrder(){
   const r=await api('/api/order',{method:'POST',body:{pid:curPid,school:$('o-school').value,
     stu_user:$('o-user').value,stu_pass:$('o-pass').value,cookies:$('o-cookies').value}});
-  if(!r.ok)return toast(r.msg||'下单失败');
+  if(!r.ok){toast(r.msg||'下单失败');if(r.msg==='余额不足')m('m-pay',1);return}
   m('m-order',0);toast('下单成功 #'+(r.oid));show('orders')}
 async function loadOrders(){const r=await api('/api/orders');
   $('olist').innerHTML=r.items.map(o=>{const t=new Date(o.created_at*1000).toLocaleString('zh-CN',{hour12:false});
@@ -182,6 +201,10 @@ async function loadOrders(){const r=await api('/api/orders');
     return`<tr><td>${o.oid}</td><td>${o.name}</td><td>¥${o.fees}</td>
     <td><span class="st ${c}">${o.status}</span></td><td>${t}</td>
     <td><a href="javascript:viewLog(${o.oid})" style="color:var(--acc2)">详情</a></td></tr>`}).join('')}
+async function doRecharge(){
+  const r=await api('/api/recharge',{method:'POST',body:{code:$('r-code').value}});
+  if(!r.ok)return toast(r.msg||'充值失败');
+  m('m-pay',0);$('r-code').value='';toast('充值成功 +¥'+r.amount.toFixed(2));enter()}
 async function viewLog(oid){m('m-log',1);$('olog').textContent='加载中…';
   const r=await api('/api/order/'+oid);$('olog').textContent=r.item?(r.item.worker_log||'（排队中，暂无日志）'):'订单不存在'}
 if(tok)enter();
