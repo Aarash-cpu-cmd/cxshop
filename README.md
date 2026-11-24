@@ -16,6 +16,21 @@
 
 ---
 
+## 🌍 For Employers / EN
+
+**Full-stack order pipeline for browser automation** — a complete reference build of "customer places order → job is dispatched → headless browser workers execute → status written back":
+
+- **FastAPI storefront + admin** — registration, balance, order tracking, admin dashboard, zero-build SPA
+- **Drop-in upstream API** — FreeDom/29-compatible `api.php` protocol (getclass / getmoney / add / budan / chadanoid) so downstream resellers can dock in
+- **Queue dispatcher** — polls orders, spawns isolated Docker workers, writes back status + logs, exit-code aware, dead-proxy auto-fallback
+- **Headless Chromium workers** — real browser sessions via [chaoxing-grind](https://github.com/Aarash-cpu-cmd/chaoxing-grind), cookie injection over CDP
+- **Proxy pool** — vendored proxy_pool with REST `/pop`, sticky per-job egress
+- **One command**: `docker compose up` brings up MySQL + shop + dispatcher + proxy stack
+
+*This repo is the architecture clients mean when they ask for "a scraping order system".*
+
+---
+
 ## 🏗 架构
 
 ```
