@@ -110,7 +110,7 @@ switch ($act) {
 		}
 		$clientip = real_ip();
 		$ip = $DB->count("select ip from qingka_wangke_log where type='邀请码注册商户' and addtime>'" . $jtdate . "' and ip='" . $clientip . "' ");
-		if ($ip > 1) {
+		if ($ip > 20) {
 			exit("{\"code\":-1,\"msg\":\"同一个IP同一天最多只能注册1次\"}");
 		}
 		if ($DB->query("insert into qingka_wangke_user (uuid,name,user,pass,addprice,addtime) values ('" . $a["uid"] . "','" . $name . "','" . $user . "','" . $pass . "','" . $a["yqprice"] . "','" . $date . "')")) {
