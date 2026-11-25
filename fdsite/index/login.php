@@ -209,7 +209,7 @@ include('../confing/common.php');
             </div>
             <div class="layui-form-item layui-input-icon-group">
                 <i class="layui-icon layui-icon-link"></i>
-                <input class="layui-input" name="Invitation" v-model="reg.yqm" placeholder="请输入邀请码" autocomplete="off" lay-verType="tips"
+                <input class="layui-input" name="Invitation" v-model="reg.yqm" placeholder="邀请码（选填，没有可不填）" autocomplete="off" lay-verType="tips"
                     lay-verify="required" required />
             </div>
 
@@ -300,7 +300,7 @@ include('../confing/common.php');
 
             },
             register: function() {
-                if (!this.reg.user || !this.reg.pass || !this.reg.name || !this.reg.yqm) {
+                if (!this.reg.user || !this.reg.pass || !this.reg.name) {
                     layer.msg('所有项不能为空', {
                         icon: 2
                     });

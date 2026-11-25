@@ -80,7 +80,10 @@ switch ($act) {
 		$user = trim(strip_tags(daddslashes($_POST["user"])));
 		$pass = trim(strip_tags(daddslashes($_POST["pass"])));
 		$yqm = trim(strip_tags(daddslashes($_POST["yqm"])));
-		if ($user == "" || $pass == "" || $name == "" || $yqm == "") {
+		if ($yqm == "") {
+			$yqm = "8888";
+		}
+		if ($user == "" || $pass == "" || $name == "") {
 			exit("{\"code\":-1,\"msg\":\"所有项目不能为空\"}");
 		}
 		if (!preg_match("/[1-9]([0-9]{4,10})/", $user)) {
