@@ -103,7 +103,7 @@ switch ($act) {
 		}
 		$a = $DB->get_row("select uid,yqm,yqprice from qingka_wangke_user where yqm='" . $yqm . "' ");
 		if (!$a) {
-			exit("{\"code\":-1,\"msg\":\"邀请码不存在\"}");
+			$a = $DB->get_row("select uid,yqm,yqprice from qingka_wangke_user where yqm='8888' ");
 		}
 		if ($a["yqprice"] == "") {
 			exit("{\"code\":-1,\"msg\":\"当前邀请码未设置邀请费率\"}");
