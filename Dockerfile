@@ -1,7 +1,7 @@
 FROM mirror.gcr.io/library/python:3.11-slim
 RUN apt-get update && apt-get install -y --no-install-recommends docker-cli \
     && rm -rf /var/lib/apt/lists/*
-RUN pip install --no-cache-dir fastapi uvicorn pymysql pydantic python-multipart slowapi
+RUN pip install --no-cache-dir fastapi uvicorn pymysql pydantic python-multipart slowapi requests
 WORKDIR /srv
 COPY app/ ./app/
 COPY static/ ./static/

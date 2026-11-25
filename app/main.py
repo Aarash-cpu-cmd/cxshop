@@ -284,9 +284,20 @@ async def upstream_api(request: Request, act: str = ''):
         f = await request.form()
     else:
         f = {}
+    def _fix(v):
+        # starlette decodes urlencoded forms as latin-1; repair utf-8 mojibake
+        if isinstance(v, str):
+            try:
+                return v.encode('latin-1').decode('utf-8')
+            except (UnicodeEncodeError, UnicodeDecodeError):
+                return v
+        return v
+
     def _p(name):
         v = f.get(name)
-        return v if v is not None else request.query_params.get(name)
+        if v is None:
+            v = request.query_params.get(name)
+        return _fix(v)
     uid = _cap(_p('uid'), 20)
     key = _cap(_p('key'), 64)
     if not act:
@@ -299,13 +310,30 @@ async def upstream_api(request: Request, act: str = ''):
         return {'code': 1, 'msg': '查询成功', 'user': u[1], 'name': u[1], 'money': float(u[2])}
 
     if act == 'getclass':
+        only_cid = _to_int(_p('cid'))
         with tx() as con, con.cursor(pymysql.cursors.DictCursor) as c:
-            c.execute("SELECT pid,name,price,descr FROM products WHERE enabled=1 ORDER BY pid")
-            items = [{'cid': r['pid'], 'kcid': r['pid'], 'name': r['name'],
-                      'noun': '', 'price': float(r['price']), 'info': r['descr'],
-                      'content': r['descr'], 'status': 1, 'miaoshua': 0,
-                      'sort': r['pid']} for r in c.fetchall()]
+            if only_cid:
+                c.execute("SELECT pid,name,price,descr FROM products WHERE enabled=1 AND pid=%s ORDER BY pid", (only_cid,))
+            else:
+                c.execute("SELECT pid,name,price,descr FROM products WHERE enabled=1 ORDER BY pid")
+            items = [{'sort': r['pid'], 'cid': r['pid'], 'kcid': r['pid'], 'fenlei': 1,
+                      'name': r['name'], 'noun': str(r['pid']), 'price': float(r['price']),
+                      'content': r['descr'] or '', 'info': r['descr'] or '',
+                      'status': 1, 'miaoshua': 0, 'category_name': '网课'} for r in c.fetchall()]
         return {'code': 1, 'data': items}
+
+    if act == 'get':
+        school = _cap(_p('school'), 255)
+        stu_user = _cap(_p('user'), 255)
+        stu_pass = _cap(_p('pass'), 255)
+        if not school or not stu_user or not stu_pass:
+            return {'code': 0, 'msg': '请检查项目是否完整'}
+        try:
+            from app.cxquery import query_courses
+        except ImportError:
+            from cxquery import query_courses
+        result, _err = query_courses(school, stu_user, stu_pass)
+        return result
 
     if act == 'add':
         school = _cap(_p('school'), 255)
@@ -315,29 +343,37 @@ async def upstream_api(request: Request, act: str = ''):
         kcids = _cap(_p('kcid'), 4000)
         kcnames = _cap(_p('kcname'), 4000)
         cookies = _cap(_p('cookies'), 65536)
-        if not school or not platform:
+        if not school or not stu_user or not stu_pass or not platform or not kcnames:
             return {'code': 0, 'msg': '所有项目不能为空'}
         names = kcnames.split(',') if kcnames else []
         ids = kcids.split(',') if kcids else []
         if len(ids) > 20 or len(names) > 20:
             return {'code': -1, 'msg': '单次最多提交 20 门课程'}
+        if len(ids) < len(names):
+            ids = ids + [''] * (len(names) - len(ids))
         with tx(atomic=True) as con, con.cursor() as c:
             c.execute("SELECT price,name FROM products WHERE pid=%s AND enabled=1", (platform,))
             p = c.fetchone()
             if not p:
-                return {'code': -1, 'msg': '项目不存在或已下架'}
+                return {'code': -1, 'msg': '商品已下架，下单失败！'}
+            c.execute("""SELECT oid FROM orders WHERE uid=%s AND pid=%s AND school=%s AND stu_user=%s
+                         AND created_at>%s LIMIT 1""",
+                      (u[0], platform, school, stu_user, int(time.time()) - 100 * 86400))
+            if c.fetchone():
+                return {'code': -1, 'msg': '存在100天内的重复订单！请勿重复提交！'}
             courses = {i: {'clazzid': '', 'name': n_} for i, n_ in zip(ids, names)}
-            n = max(len(ids), 1)
+            n = max(len(names), 1)
             total = float(p[0]) * n
             c.execute("UPDATE users SET balance=balance-%s WHERE uid=%s AND balance>=%s",
                       (total, u[0], total))
             if c.rowcount != 1:
-                return {'code': -1, 'msg': f'余额不足{total}元'}
+                return {'code': -1, 'msg': '余额不足以本次提交'}
             c.execute("""INSERT INTO orders(uid,pid,school,stu_user,stu_pass,cookies,kcid,status,fees,created_at)
                          VALUES(%s,%s,%s,%s,%s,%s,%s,'queued',%s,%s)""",
                       (u[0], platform, school, stu_user, stu_pass, cookies,
                        json.dumps(courses, ensure_ascii=False), total, int(time.time())))
-            return {'code': 1, 'msg': f'成功提交{n}门课程', 'data': {'oid': c.lastrowid}}
+            oid = c.lastrowid
+            return {'code': 0, 'msg': '提交成功', 'status': 0, 'message': '提交成功', 'id': oid}
 
     if act == 'budan':
         oid = _to_int(_p('id') or _p('oid'))
@@ -354,18 +390,51 @@ async def upstream_api(request: Request, act: str = ''):
                       ('re-queued by API budan', oid))
             return {'code': 1, 'msg': '已重新下单'}
 
-    if act in ('chadanoid', 'get', 'up'):
-        oid = _to_int(_p('yid') or _p('id') or _p('oid'))
-        if not oid:
-            return {'code': -1, 'msg': '订单号无效'}
-        with tx() as con, con.cursor() as c:
-            c.execute("SELECT uid,status,worker_log FROM orders WHERE oid=%s", (oid,))
-            r = c.fetchone()
-            if not r or r[0] != u[0]:
-                return {'code': -1, 'msg': '订单不存在'}
-            return {'code': 1, 'msg': 'ok', 'data': {'oid': oid, 'status': r[1],
-                    'dockstatus': {'queued': '0', 'running': 'cli_run', 'done': 'cli_done',
-                                   'fail': 'cli_fail'}.get(r[1], '0'), 'log': (r[2] or '')[-500:]}}
+    if act in ('chadanoid', 'up'):
+        oid = _to_int(_p('oid') or _p('yid') or _p('id'))
+        username = _cap(_p('username'), 255)
+        school_q = _cap(_p('school'), 255)
+        if not oid and not username and not school_q:
+            return {'code': -1, 'msg': '至少需要一个有效参数'}
+        status_map = {'queued': '排队中', 'running': '刷课中', 'done': '已完成', 'fail': '异常'}
+        with tx() as con, con.cursor(pymysql.cursors.DictCursor) as c:
+            sql = "SELECT * FROM orders WHERE uid=%s"
+            args = [u[0]]
+            if oid:
+                sql += " AND oid=%s"
+                args.append(oid)
+            if username:
+                sql += " AND stu_user=%s"
+                args.append(username)
+            if school_q:
+                sql += " AND school LIKE %s"
+                args.append(f'%{school_q}%')
+            sql += " ORDER BY oid DESC LIMIT 20"
+            c.execute(sql, args)
+            rows = c.fetchall()
+            if not rows:
+                return {'code': -1, 'msg': '未查到订单信息'}
+            data = []
+            for r in rows:
+                kc = r.get('kcid') or ''
+                kcname = ''
+                try:
+                    cc = json.loads(kc)
+                    kcname = ','.join(v.get('name', '') for v in cc.values() if isinstance(v, dict))
+                except Exception:
+                    kcname = kc[:100]
+                st = status_map.get(r['status'], r['status'])
+                log = (r.get('worker_log') or '')[-200:]
+                proc = '100%' if r['status'] == 'done' else ('0%' if r['status'] == 'queued' else '')
+                data.append({
+                    'id': r['oid'], 'ptname': r.get('pid'), 'school': r['school'],
+                    'name': '', 'user': r['stu_user'], 'kcname': kcname,
+                    'addtime': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(r['created_at'] or 0)),
+                    'courseStartTime': '', 'courseEndTime': '',
+                    'examStartTime': '', 'examEndTime': '',
+                    'status': st, 'process': proc, 'remarks': log,
+                })
+            return {'code': 1, 'data': data}
 
     return {'code': -1, 'msg': f'unknown act: {act}'}
 

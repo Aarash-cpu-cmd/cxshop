@@ -1,0 +1,75 @@
+准备服务器配置：
+    php7.4
+    phpMyAdmin 5.0
+    MySQL 5.7.40
+    进程守护管理器
+    Redis 7.2.4
+
+搭建教程
+1-新建站点 新建数据库 右键导入数据库文件 fdmb.sql
+
+
+2-设置网站伪静态（可以申请ssl证书，选择Let's Encrypt点击申请即可，记到勾选强制https）
+    location / {
+    	try_files $uri $uri/ $uri.php$is_args$args;
+    }
+
+3-数据库导入
+    导入根目录fdmb.sql文件到数据库中
+
+4-打开confing/config.php文件
+    修改数据库名字密码用户名
+
+5-打开网站，登录！
+
+6-配置自动交单，自动同步，批量同步/补刷，邮件监控等计划任务
+    交单计划任务设置（建议一分钟一次）
+    你的网址/redis/redis_addru.php
+    
+    进程守护管理器里添加守护进程
+    目录选择Redis即可，
+    启动命令
+    nohup php redis_addchu.php &
+    线程数自己决定20-100都行，不要太大
+    
+    
+    自动同步（使用yqsl的chusheng，文件没在Redis目录里，在chusheng里面）
+    
+    挂计划任务(入队部分)aachu-eechu
+    建议入队间隔:
+    aa每3-7分钟
+    bb每2分钟
+    cc每10-20分钟
+    dd每天早上八点
+    ee每15-30分钟每个进程的进程数建议cpu数量或x2 比如8/12/16为了日志显示正常建议修改一下进程守护日志的最大存储大小。
+    
+    进程守护(出队部分)
+    tb1.php
+    tb2.php
+    启动命令 nohup php tb1.php &
+    (仅展示一个 以此类推)
+    
+    同理配置，批量同步（在redis里面，计划任务选择pltbru.php，进程守护命令使用nohup php pltbchu.php &），批量补刷（在redis里面，计划任务选择plbsru.php，进程守护命令使用nohup php pltbchu.php &）
+
+
+邮件监控，挂一个计划任务就行了：你的网站/redis/orderemail.php
+
+到这里就大功告成了！
+
+
+
+
+一些常用的数据库操作指令快速上手
+UPDATE `qingka_wangke_class` SET `price` = `price` * 1.05 数据库执行一键提升价格
+UPDATE `qingka_wangke_class` SET `fenlei` = 2 WHERE `name` LIKE '%遗留%'  一键修改分类
+
+UPDATE qingka_wangke_class
+SET status = 0
+WHERE name LIKE '%技师%';   一键上/下架某分类所有项目
+
+UPDATE qingka_wangke_class
+SET price = price * 1.2
+WHERE name LIKE '%软件%';   一键修改某分类价格
+
+
+nohup php redis_addchu.php &多线程启动代码 以此类推

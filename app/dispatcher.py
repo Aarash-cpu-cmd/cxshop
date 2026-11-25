@@ -39,12 +39,27 @@ def get_proxy():
 
 
 def claim(conn):
+    """Claim one pending order from either the cxshop orders table or the
+    FreeDom template's qingka_wangke_order table (tagged _fd=True)."""
     with conn.cursor(pymysql.cursors.DictCursor) as c:
         c.execute("SELECT oid,pid,school,stu_user,stu_pass,cookies,kcid "
                   "FROM orders WHERE status='queued' ORDER BY oid LIMIT 1")
         row = c.fetchone()
         if row:
             c.execute("UPDATE orders SET status='running' WHERE oid=%s", (row['oid'],))
+            return row
+        # FreeDom template orders: 待处理 = newly placed
+        c.execute("SELECT oid,school,user AS stu_user,`pass` AS stu_pass,"
+                  "kcname,kcid,status FROM qingka_wangke_order "
+                  "WHERE status='待处理' ORDER BY oid LIMIT 1")
+        row = c.fetchone()
+        if row:
+            c.execute("UPDATE qingka_wangke_order SET status='刷课中', dockstatus='1' WHERE oid=%s",
+                      (row['oid'],))
+            row['_fd'] = True
+            row['cookies'] = ''
+            row['pid'] = 0
+            return row
     return row
 
 
@@ -80,17 +95,42 @@ def run_grind(oid, proxy):
 
 def process_order(conn, o):
     oid = o['oid']
-    d = f'{JOBS_DIR}/{oid}'
+    d = f"{JOBS_DIR}/{'fd' if o.get('_fd') else ''}{oid}"
     os.makedirs(d, exist_ok=True)
     log = []
     ck = (o['cookies'] or '').strip()
     if not ck:
-        return 'fail', 'order has no cookies attached\n'
+        if not o.get('stu_user') or not o.get('stu_pass'):
+            return 'fail', 'order has neither cookies nor stu_user/stu_pass\n'
+        try:
+            from cxquery import cx_login
+        except ImportError:
+            return 'fail', 'cxquery missing in dispatcher image\n'
+        s, err = cx_login(o['stu_user'], o['stu_pass'])
+        if err:
+            return 'fail', f'chaoxing login failed: {err}\n'
+        cks = [{'name': c.name, 'value': c.value,
+                'domain': c.domain or '.chaoxing.com', 'path': c.path or '/'}
+               for c in s.cookies]
+        ck = json.dumps(cks, ensure_ascii=False)
+        log.append(f'password login ok, {len(cks)} cookies\n')
     open(f'{d}/cookies.json', 'w').write(ck)
-    try:
-        courses = json.loads(o['kcid'] or '{}')
-    except Exception:
+    if o.get('_fd'):
+        # FreeDom order: kcname/kcid are comma-separated lists
+        names = (o.get('kcname') or '').split(',')
+        ids = (o.get('kcid') or '').split(',')
         courses = {}
+        for i, n_ in zip(ids, names):
+            i = (i or '').strip()
+            if n_.strip():
+                courses[i] = {'clazzid': (i.split('_')[1] if '_' in i else ''),
+                              'courseid': (i.split('_')[0] if '_' in i else ''),
+                              'name': n_.strip()}
+    else:
+        try:
+            courses = json.loads(o['kcid'] or '{}')
+        except Exception:
+            courses = {}
     json.dump(courses, open(f'{d}/courses.json', 'w'))
 
     proxy = get_proxy()
@@ -119,8 +159,14 @@ def main():
                 except Exception as e:
                     st, log = 'fail', f'exc: {e}'
                 with conn.cursor() as c:
-                    c.execute("UPDATE orders SET status=%s, worker_log=%s WHERE oid=%s",
-                              (st, log, o['oid']))
+                    if o.get('_fd'):
+                        fd_status = {'done': '已完成', 'fail': '异常'}.get(st, '刷课中')
+                        proc = '100%' if st == 'done' else ''
+                        c.execute("UPDATE qingka_wangke_order SET status=%s, process=%s, remarks=%s WHERE oid=%s",
+                                  (fd_status, proc, (log or '')[-500:], o['oid']))
+                    else:
+                        c.execute("UPDATE orders SET status=%s, worker_log=%s WHERE oid=%s",
+                                  (st, log, o['oid']))
                 print(f"[order {o['oid']}] -> {st}", flush=True)
             conn.close()
         except Exception as e:

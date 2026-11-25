@@ -1,7 +1,8 @@
 FROM mirror.gcr.io/library/python:3.11-slim
 RUN apt-get update && apt-get install -y --no-install-recommends docker-cli \
     && rm -rf /var/lib/apt/lists/*
-RUN pip install --no-cache-dir pymysql
+RUN pip install --no-cache-dir pymysql requests
 WORKDIR /opt/dispatcher
 COPY app/dispatcher.py .
+COPY app/cxquery.py .
 CMD ["python", "dispatcher.py"]
